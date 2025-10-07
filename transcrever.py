@@ -1,111 +1,87 @@
-import time
-from pathlib import Path
 import whisper
+import os
+from pathlib import Path  # Biblioteca para lidar com caminhos de arquivos de forma mais robusta
+import moviepy.editor as mp # Biblioteca para extrair o áudio do vídeo
 
-# --- CONFIGURAÇÕES GERAIS ---
-# Todas as configurações foram agrupadas neste dicionário para fácil acesso.
-CONFIG = {
-    "pasta_entrada": "audios",
-    "pasta_saida": "transcricoes",
-    "modelo_whisper": "base",  # Opções: "tiny", "base", "small", "medium", "large"
-    "extensoes_aceitas": ['.wav', '.mp3', '.m4a', '.ogg', '.flac']
-}
+# Carrega o modelo do Whisper (pode escolher entre "tiny", "base", "small", "medium", "large")
+# "base" é um bom equilíbrio entre velocidade e precisão.
+try:
+    model = whisper.load_model("base")
+    print("Modelo Whisper carregado com sucesso.")
+except Exception as e:
+    print(f"Erro ao carregar o modelo Whisper: {e}")
+    model = None
 
-def carregar_modelo(nome_modelo: str):
+def transcrever_audio(caminho_arquivo):
     """
-    Carrega o modelo Whisper especificado. Na primeira vez, o modelo será baixado.
-    Retorna o modelo carregado ou None se ocorrer um erro.
+    Transcreve o conteúdo de um arquivo de áudio ou vídeo.
+    Se for um vídeo, extrai o áudio primeiro e depois transcreve.
     """
+    if not model:
+        return "Erro: Modelo Whisper não foi carregado. A transcrição não pode continuar."
+
+    caminho_final_audio = None
+    arquivo_temporario = False
+
     try:
-        print(f"\nCarregando o modelo '{nome_modelo}' do Whisper...")
-        modelo = whisper.load_model(nome_modelo)
-        print("Modelo carregado com sucesso!")
-        return modelo
-    except Exception as e:
-        print(f"ERRO FATAL: Não foi possível carregar o modelo Whisper. Detalhes: {e}")
-        return None
+        # Usa pathlib para lidar com o caminho de forma mais segura
+        p = Path(caminho_arquivo)
+        extensao = p.suffix.lower()
 
-def transcrever_arquivo(modelo, caminho_audio: Path, pasta_saida: Path):
-    """
-    Transcreve um único arquivo de áudio e salva o resultado em um arquivo .txt.
+        # Lista de extensões de vídeo comuns
+        extensoes_video = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
 
-    Args:
-        modelo: O modelo Whisper carregado.
-        caminho_audio (Path): O caminho para o arquivo de áudio.
-        pasta_saida (Path): A pasta onde o .txt será salvo.
+        # 1. VERIFICA SE É VÍDEO E EXTRAI O ÁUDIO
+        if extensao in extensoes_video:
+            print(f"Arquivo de vídeo detectado: {p.name}. Extraindo o áudio...")
+            arquivo_temporario = True
+            
+            # Define o caminho para o arquivo de áudio temporário (ex: video.mp4 -> video.mp3)
+            caminho_final_audio = p.with_suffix(".mp3")
 
-    Returns:
-        str: O status da operação ('processado', 'pulado', 'erro').
-    """
-    nome_base = caminho_audio.stem  # Pega o nome do arquivo sem a extensão
-    caminho_txt = pasta_saida / f"{nome_base}.txt"
+            # Carrega o clipe de vídeo
+            video_clip = mp.VideoFileClip(str(p))
+            
+            # Extrai o áudio e salva no arquivo temporário
+            video_clip.audio.write_audiofile(str(caminho_final_audio), logger=None)
+            
+            # Fecha os clipes para liberar memória
+            video_clip.close()
+            print(f"Áudio extraído com sucesso para: {caminho_final_audio.name}")
+        else:
+            # Se já for áudio, usa o caminho original
+            print(f"Arquivo de áudio detectado: {p.name}")
+            caminho_final_audio = p
 
-    if caminho_txt.exists():
-        print(f"--- Já existe: '{caminho_txt.name}'. Pulando.")
-        return "pulado"
-
-    print(f"[+] Processando: '{caminho_audio.name}'...")
-    try:
-        resultado = modelo.transcribe(str(caminho_audio))
-        texto_transcrito = resultado.get('text', '').strip()
-
-        if not texto_transcrito:
-            print(f"   -> Atenção: Nenhum texto detectado no arquivo.")
-        
-        with open(caminho_txt, 'w', encoding='utf-8') as f:
-            f.write(texto_transcrito)
-        
-        print(f"   -> Salvo em: '{caminho_txt.name}'")
-        return "processado"
+        # 2. TRANSCREVE O ÁUDIO
+        print("Iniciando a transcrição com o Whisper...")
+        if caminho_final_audio and caminho_final_audio.exists():
+            resultado = model.transcribe(str(caminho_final_audio), fp16=False)
+            texto_transcrito = resultado['text']
+            print("Transcrição concluída.")
+            return texto_transcrito
+        else:
+            return "Erro: Arquivo de áudio não foi encontrado para transcrição."
 
     except Exception as e:
-        print(f"   *** ERRO ao processar '{caminho_audio.name}': {e} ***")
-        return "erro"
+        print(f"Ocorreu um erro durante o processo: {e}")
+        return f"Erro: {e}"
 
-def main():
-    """
-    Função principal que orquestra todo o processo.
-    """
-    print(">>> Iniciando script de transcrição de áudio <<<")
-    inicio_total = time.time()
-    
-    # Converte os nomes das pastas de string para objetos Path
-    pasta_entrada = Path(CONFIG["pasta_entrada"])
-    pasta_saida = Path(CONFIG["pasta_saida"])
+    finally:
+        # 3. LIMPEZA: Apaga o arquivo de áudio temporário se ele foi criado
+        if arquivo_temporario and caminho_final_audio and caminho_final_audio.exists():
+            os.remove(caminho_final_audio)
+            print(f"Arquivo temporário '{caminho_final_audio.name}' foi removido.")
 
-    # Verificação inicial das pastas
-    if not pasta_entrada.is_dir():
-        print(f"ERRO: A pasta de entrada '{pasta_entrada}' não foi encontrada.")
-        return
-
-    pasta_saida.mkdir(exist_ok=True) # Cria a pasta de saída se não existir
-
-    modelo = carregar_modelo(CONFIG["modelo_whisper"])
-    if not modelo:
-        return # Encerra o script se o modelo não puder ser carregado
-
-    # Dicionário para guardar as estatísticas
-    stats = {"processado": 0, "pulado": 0, "erro": 0}
-
-    print("\nIniciando a varredura e transcrição dos arquivos...")
-    
-    # Itera sobre todos os arquivos na pasta de entrada
-    for arquivo in pasta_entrada.iterdir():
-        # Verifica se é um arquivo e se a extensão é suportada
-        if arquivo.is_file() and arquivo.suffix.lower() in CONFIG["extensoes_aceitas"]:
-            status = transcrever_arquivo(modelo, arquivo, pasta_saida)
-            stats[status] += 1
-    
-    duracao_total = time.time() - inicio_total
-    
-    # Resumo final
-    print("\n" + "="*40)
-    print(">>> PROCESSO CONCLUÍDO <<<")
-    print(f"Tempo total de execução: {duracao_total:.2f} segundos")
-    print(f"Arquivos processados com sucesso: {stats['processado']}")
-    print(f"Arquivos pulados (transcrição já existia): {stats['pulado']}")
-    print(f"Arquivos que resultaram em erro: {stats['erro']}")
-    print("="*40)
-
-if __name__ == "__main__":
-    main()
+# Se você quiser testar o script diretamente pelo terminal, pode usar este bloco
+if __name__ == '__main__':
+    # Exemplo de como chamar a função
+    # Substitua pelo caminho de um vídeo ou áudio no seu PC
+    caminho_do_teste = "caminho/para/seu/video.mp4" 
+    if Path(caminho_do_teste).exists():
+        texto = transcrever_audio(caminho_do_teste)
+        print("\n--- TEXTO TRANSCRITO ---\n")
+        print(texto)
+    else:
+        print(f"Arquivo de teste não encontrado em: {caminho_do_teste}")
+        print("Por favor, edite o script para apontar para um arquivo válido.")
