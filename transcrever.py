@@ -1,100 +1,76 @@
-import whisper
 import os
-from pathlib import Path
-import subprocess # <--- Módulo nativo para rodar comandos do terminal
+from moviepy.editor import VideoFileClip
+# Importe aqui a biblioteca que você usa para transcrição, por exemplo:
+# import speech_recognition as sr
 
-# Carrega o modelo do Whisper
-try:
-    model = whisper.load_model("base")
-    print("Modelo Whisper carregado com sucesso.")
-except Exception as e:
-    print(f"Erro ao carregar o modelo Whisper: {e}")
-    model = None
-
-def extrair_audio_com_ffmpeg(caminho_video, caminho_saida_audio):
+def transcrever_audio(caminho_do_audio):
     """
-    Usa o FFmpeg diretamente para extrair o áudio de um vídeo.
-    Retorna True se for bem-sucedido, False caso contrário.
+    Substitua o conteúdo desta função pela sua lógica de transcrição.
+    Esta é apenas uma função de exemplo.
     """
-    print("Executando o FFmpeg para extrair o áudio...")
+    print(f"Iniciando a transcrição para o arquivo: {caminho_do_audio}")
     
-    # O comando que será executado no terminal.
-    # -i: arquivo de entrada
-    # -vn: ignora o vídeo (não processa o vídeo)
-    # -acodec libmp3lame: codec de áudio para MP3
-    # -ab 192k: bitrate do áudio para 192 kbps (boa qualidade)
-    # -y: sobrescreve o arquivo de saída se ele já existir (evita que o script trave)
-    command = [
-        "ffmpeg",
-        "-i", str(caminho_video),
-        "-vn",
-        "-acodec", "libmp3lame",
-        "-ab", "192k",
-        "-y",
-        str(caminho_saida_audio)
-    ]
+    # --- INÍCIO DO EXEMPLO DA SUA LÓGICA ---
+    # Por exemplo, se você estiver usando a biblioteca speech_recognition:
+    # reconhecedor = sr.Recognizer()
+    # with sr.AudioFile(caminho_do_audio) as source:
+    #     audio = reconhecedor.record(source)
+    # try:
+    #     texto = reconhecedor.recognize_google(audio, language='pt-BR')
+    #     print("Texto transcrito:")
+    #     print(texto)
+    # except sr.UnknownValueError:
+    #     print("Não foi possível entender o áudio")
+    # except sr.RequestError as e:
+    #     print(f"Erro na requisição ao serviço de reconhecimento de fala; {e}")
+    # --- FIM DO EXEMPLO DA SUA LÓGICA ---
+    
+    # Simplesmente para este exemplo, vamos retornar um texto fictício.
+    texto_transcrito = "Este é o texto transcrito do áudio."
+    print("Transcrição concluída.")
+    return texto_transcrito
 
-    try:
-        # Roda o comando. check=True faz com que um erro seja lançado se o ffmpeg falhar.
-        # capture_output=True esconde a saída do ffmpeg e a captura para depuração.
-        subprocess.run(command, check=True, capture_output=True, text=True)
-        print("Áudio extraído com sucesso pelo FFmpeg.")
-        return True
-    except FileNotFoundError:
-        print("\nERRO: O comando 'ffmpeg' não foi encontrado.")
-        print("Verifique se o FFmpeg está instalado e configurado no PATH do seu sistema.")
-        return False
-    except subprocess.CalledProcessError as e:
-        # Se o FFmpeg retornar um erro (ex: arquivo de vídeo inválido)
-        print("\nERRO: O FFmpeg encontrou um problema.")
-        print(f"Comando: {' '.join(command)}")
-        print(f"Erro retornado:\n{e.stderr}") # Mostra a mensagem de erro exata do FFmpeg
-        return False
-
-
-def transcrever_audio(caminho_arquivo):
+def processar_arquivo(caminho_do_arquivo):
     """
-    Transcreve o conteúdo de um arquivo de áudio ou vídeo.
-    Se for um vídeo, extrai o áudio primeiro e depois transcreve.
+    Processa um arquivo de áudio ou vídeo, extrai o áudio se necessário,
+    e chama a função de transcrição.
     """
-    if not model:
-        return "Erro: Modelo Whisper não foi carregado. A transcrição não pode continuar."
+    # Nomes dos arquivos
+    nome_base, extensao = os.path.splitext(caminho_do_arquivo)
+    extensoes_video = ['.mp4', '.mov', '.avi', '.mkv']
+    
+    caminho_do_audio = caminho_do_arquivo
+    audio_temporario = False
 
-    caminho_final_audio = None
-    arquivo_temporario = False
+    # Verifica se é um arquivo de vídeo
+    if extensao.lower() in extensoes_video:
+        print(f"Arquivo de vídeo detectado: {caminho_do_arquivo}")
+        print("Extraindo o áudio...")
+        try:
+            # Carrega o vídeo e extrai o áudio para um arquivo .wav temporário
+            video = VideoFileClip(caminho_do_arquivo)
+            caminho_do_audio = nome_base + ".wav"
+            video.audio.write_audiofile(caminho_do_audio)
+            audio_temporario = True
+            print(f"Áudio extraído com sucesso para: {caminho_do_audio}")
+        except Exception as e:
+            print(f"Ocorreu um erro ao extrair o áudio: {e}")
+            return
+    
+    # Chama a função de transcrição com o arquivo de áudio
+    transcrever_audio(caminho_do_audio)
+    
+    # Remove o arquivo de áudio temporário se ele foi criado
+    if audio_temporario:
+        print(f"Removendo arquivo de áudio temporário: {caminho_do_audio}")
+        os.remove(caminho_do_audio)
 
-    try:
-        p = Path(caminho_arquivo)
-        extensao = p.suffix.lower()
-        extensoes_video = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
-
-        if extensao in extensoes_video:
-            arquivo_temporario = True
-            caminho_final_audio = p.with_suffix(".mp3")
-            
-            # CHAMA A NOSSA NOVA FUNÇÃO USANDO SUBPROCESS
-            sucesso = extrair_audio_com_ffmpeg(p, caminho_final_audio)
-            
-            if not sucesso:
-                return "Falha ao extrair o áudio do vídeo com FFmpeg."
-        else:
-            print(f"Arquivo de áudio detectado: {p.name}")
-            caminho_final_audio = p
-
-        print("Iniciando a transcrição com o Whisper...")
-        if caminho_final_audio and caminho_final_audio.exists():
-            resultado = model.transcribe(str(caminho_final_audio), fp16=False)
-            texto_transcrito = resultado['text']
-            print("Transcrição concluída.")
-            return texto_transcrito
-        else:
-            return "Erro: Arquivo de áudio não foi encontrado para transcrição."
-
-    except Exception as e:
-        print(f"Ocorreu um erro durante o processo: {e}")
-        return f"Erro: {e}"
-
-    finally:
-        if arquivo_temporario and caminho_final_audio and caminho_final_audio.exists():
-            os.remove(caminho_final_audio)
-            print(f"Arquivo temporário '{caminho_final_audio.name}' foi removido.")
+# --- Como usar o script ---
+if __name__ == "__main__":
+    # Peça ao usuário para inserir o caminho do arquivo
+    caminho_arquivo_input = input("Arraste o arquivo de áudio/vídeo para cá ou digite o caminho: ").strip().replace("'", "").replace('"', '')
+    
+    if os.path.exists(caminho_arquivo_input):
+        processar_arquivo(caminho_arquivo_input)
+    else:
+        print("Arquivo não encontrado. Verifique o caminho e tente novamente.")
